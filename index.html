@@ -43,7 +43,7 @@
         const { useState, useEffect, useCallback, useRef } = React;
 
         // 👉 YOUR GOOGLE APPS SCRIPT WEB APP URL
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz9MLxDSRawiMzESUAW1pqbSzxcebskwHEnUHIE6y6A-vZi18Ab9k09LBjgiq6_spXU/exec';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyMZbigYpq-lsH_hBmmKFmNE-A5O4CHHIjH4lwzn2WGvF-jr1POgc14X64UuLe1KDTO/exec';
 
         // Safely wrap Lucide icons to prevent React DOM removal errors
         const Icon = ({ name, className = "", size = 24, strokeWidth = 2 }) => {
@@ -105,8 +105,8 @@
                         setErrorMsg("Script Error: " + data.error);
                     }
                 } catch (error) {
-                    console.error("Failed to fetch from Google Sheets:", error);
-                    setErrorMsg("Connection blocked. Ensure Apps Script is deployed with 'Who has access: Anyone'.");
+                    console.warn("Fetch Warning (CORS/Redirect):", error.message);
+                    setErrorMsg("Connection blocked! Go to Apps Script -> Manage Deployments -> Edit -> set 'Who has access' to 'Anyone' -> Deploy as New Version.");
                 } finally {
                     setLoading(false);
                     if (!isSilent) setIsRefreshing(false);
@@ -171,8 +171,8 @@
                         setFormData({ name: '', clientName: '', filament: '', cost: '', material: 'PLA', selectedColor: '#81cfff', comments: '' });
                     }, 1500);
                 } catch (error) {
-                    console.error("Upload Error:", error);
-                    setErrorMsg("Failed to add product. Check Apps Script permissions.");
+                    console.warn("Upload Warning:", error.message);
+                    setErrorMsg("Failed to add product. Ensure Apps Script deployment access is set to 'Anyone'.");
                     setIsSubmitting(false);
                 }
             };
@@ -192,7 +192,7 @@
                         redirect: 'follow'
                     });
                 } catch (error) {
-                    console.error("Delete Error:", error);
+                    console.warn("Delete Warning:", error.message);
                     fetchInventory(false); // Re-sync if failed
                 }
             };
@@ -216,7 +216,7 @@
                             <div className="flex flex-col items-center justify-center min-h-[70vh] animate-in fade-in duration-500">
                                 {errorMsg && (
                                     <div className="mb-10 w-full max-w-2xl p-4 border border-red-500/50 bg-red-500/10 rounded-lg text-red-500 text-xs flex items-center justify-center gap-3">
-                                        <Icon name="info" size={16} />
+                                        <Icon name="info" size={24} className="shrink-0" />
                                         <span>{errorMsg}</span>
                                     </div>
                                 )}

@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RELIC 3D LABS | Inventory Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#81cfff',
+                        surface: '#111316',
+                        'surface-variant': '#1a1c1f',
+                        outline: '#333538',
+                        'on-surface-variant': '#8d909d',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { background-color: #111316; color: #e2e2e6; font-family: 'Inter', sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="selection:bg-primary selection:text-black">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useRef } = React;
+
+        // 👉 YOUR GOOGLE APPS SCRIPT WEB APP URL
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzXw8duY_XGSCuT-WrMPZm5-6Mp38G48mmtRz2YzGXv8BWMVS2cm0aS5IsRLbSfG4gz/exec';
+
+        // Safely wrap Lucide icons to prevent React DOM removal errors
+        const Icon = ({ name, className = "", size = 24, strokeWidth = 2 }) => {
+            const iconRef = useRef(null);
+
+            useEffect(() => {
+                if (iconRef.current && window.lucide) {
+                    iconRef.current.innerHTML = `<i data-lucide="${name}" class="${className}" style="width: ${size}px; height: ${size}px; stroke-width: ${strokeWidth}px;"></i>`;
+                    window.lucide.createIcons({ root: iconRef.current });
+                }
+            }, [name, className, size, strokeWidth]);
+
+            return <span ref={iconRef} className={`inline-flex items-center justify-center ${className}`}></span>;
+        };
+
+        const App = () => {
+            const [currentPage, setCurrentPage] = useState('home');
+            const [inventory, setInventory] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [showNotification, setShowNotification] = useState(false);
+            const [isRefreshing, setIsRefreshing] = useState(false);
+            const [errorMsg, setErrorMsg] = useState(null);
+
+            const [formData, setFormData] = useState({
+                name: '',
+                clientName: '',
+                filament: '',
+                cost: '',
+                material: 'PLA',
+                selectedColor: '#81cfff',
+                comments: '' 
+            });
+
+            // Fetch data from Google Sheets
+            const fetchInventory = useCallback(async (isSilent = true) => {
+                if (!SCRIPT_URL.startsWith('https://script.google.com')) {
+                    setLoading(false);
+                    return;
+                }
+                
+                if (!isSilent) setIsRefreshing(true);
+                try {
+                    const response = await fetch(SCRIPT_URL, {
+                        method: 'GET',
+                        redirect: 'follow'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (Array.isArray(data)) {
+                        setInventory(data);
+                        setErrorMsg(null);
+                    } else if (data && data.error) {
+                        setErrorMsg("Script Error: " + data.error);
+                    }
+                } catch (error) {
+                    console.error("Failed to fetch from Google Sheets:", error);
+                    setErrorMsg("Connection blocked. Ensure Apps Script is deployed with 'Who has access: Anyone'.");
+                } finally {
+                    setLoading(false);
+                    if (!isSilent) setIsRefreshing(false);
+                }
+            }, []);
+
+            // Initial load and auto-refresh every 10 seconds
+            useEffect(() => {
+                fetchInventory(false);
+                const interval = setInterval(() => {
+                    fetchInventory(true);
+                }, 10000); 
+                return () => clearInterval(interval);
+            }, [fetchInventory]);
+
+            const materials = ['PLA', 'ABS', 'PETG', 'TPU', 'ASA'];
+            const colors = [
+                '#81cfff', '#ffb866', '#E2E2E6', '#111316', '#304D5A', '#673D00', '#ef4444', '#22c55e', 
+                '#3b82f6', '#eab308', '#a855f7', '#ec4899', '#ea580c', '#14b8a6', '#4f46e5', '#a3e635', 
+                '#059669', '#f43f5e', '#22d3ee', '#7c3aed', '#fbbf24', '#94a3b8', '#d946ef', '#0ea5e9', 
+                '#374151', '#737373', '#d6d3d1', '#1e2023', '#c6e7ff', '#ffddba'
+            ];
+
+            const isFormValid = formData.name && formData.clientName && formData.filament && formData.cost;
+
+            const handleInputChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handleSubmit = async (e) => {
+                if (e) e.preventDefault();
+                if (!isFormValid || !SCRIPT_URL.startsWith('https://script.google.com')) return;
+                setIsSubmitting(true);
+                
+                const newProduct = {
+                    ...formData,
+                    id: Date.now().toString(), 
+                    timestamp: new Date().toLocaleDateString()
+                };
+
+                try {
+                    // Send to Google Sheets (Using text/plain to prevent CORS preflight block)
+                    await fetch(SCRIPT_URL + "?action=add", {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'text/plain;charset=utf-8',
+                        },
+                        body: JSON.stringify(newProduct),
+                        redirect: 'follow'
+                    });
+
+                    // Update UI immediately (Optimistic update)
+                    setInventory(prev => [newProduct, ...prev]);
+                    setErrorMsg(null);
+                    setIsSubmitting(false);
+                    setShowNotification(true);
+                    
+                    setTimeout(() => {
+                        setShowNotification(false);
+                        setCurrentPage('home');
+                        setFormData({ name: '', clientName: '', filament: '', cost: '', material: 'PLA', selectedColor: '#81cfff', comments: '' });
+                    }, 1500);
+                } catch (error) {
+                    console.error("Upload Error:", error);
+                    setErrorMsg("Failed to add product. Check Apps Script permissions.");
+                    setIsSubmitting(false);
+                }
+            };
+
+            const deleteItem = async (id) => {
+                if (!SCRIPT_URL.startsWith('https://script.google.com')) return;
+                
+                // Optimistic UI update
+                setInventory(prev => prev.filter(item => item.id !== id));
+                
+                try {
+                    await fetch(SCRIPT_URL + "?action=delete&id=" + id, { 
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'text/plain;charset=utf-8',
+                        },
+                        redirect: 'follow'
+                    });
+                } catch (error) {
+                    console.error("Delete Error:", error);
+                    fetchInventory(false); // Re-sync if failed
+                }
+            };
+
+            return (
+                <div className="min-h-screen pb-12 relative overflow-x-hidden">
+                    {/* Header */}
+                    <header className="fixed top-0 w-full z-50 bg-surface text-primary tracking-tight font-bold text-sm uppercase flex justify-between items-center px-6 h-16 border-b border-outline/20">
+                        <div className="flex items-center gap-3">
+                            <span className="font-black tracking-tighter text-xl text-nowrap">RELIC 3D LABS</span>
+                        </div>
+                        <div className="flex items-center gap-6">
+                            <button onClick={() => fetchInventory(false)} className={`hover:text-primary transition-all ${isRefreshing ? 'animate-spin text-primary' : 'text-on-surface-variant'}`}>
+                                <Icon name="refresh-cw" size={18} />
+                            </button>
+                        </div>
+                    </header>
+
+                    <main className="pt-24 px-6 max-w-3xl mx-auto">
+                        {currentPage === 'home' && (
+                            <div className="flex flex-col items-center justify-center min-h-[70vh] animate-in fade-in duration-500">
+                                {errorMsg && (
+                                    <div className="mb-10 w-full max-w-2xl p-4 border border-red-500/50 bg-red-500/10 rounded-lg text-red-500 text-xs flex items-center justify-center gap-3">
+                                        <Icon name="info" size={16} />
+                                        <span>{errorMsg}</span>
+                                    </div>
+                                )}
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-2xl px-6">
+                                    <button onClick={() => setCurrentPage('inventory')} className="group bg-surface-variant border border-outline/30 p-16 rounded-lg transition-all hover:border-primary/50 flex flex-col items-center gap-4 active:scale-95 shadow-xl">
+                                        <div className="p-6 rounded-full bg-outline/20 group-hover:bg-primary/10">
+                                            <Icon name="package" size={48} className="text-on-surface-variant group-hover:text-primary" />
+                                        </div>
+                                        <p className="text-2xl text-primary font-black tracking-widest">{loading ? '...' : inventory.length}</p>
+                                    </button>
+                                    <button onClick={() => setCurrentPage('add-product')} className="group bg-surface-variant border border-outline/30 p-16 rounded-lg transition-all hover:border-primary/50 flex flex-col items-center justify-center active:scale-95 shadow-xl">
+                                        <div className="p-6 rounded-full bg-outline/20 group-hover:bg-primary/10">
+                                            <Icon name="plus" size={48} className="text-on-surface-variant group-hover:text-primary" />
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {currentPage === 'inventory' && (
+                            <div className="animate-in slide-in-from-left-4 duration-300">
+                                <div className="mb-12 flex items-center justify-between">
+                                    <button onClick={() => setCurrentPage('home')} className="p-3 bg-surface-variant border border-outline rounded-full text-on-surface-variant hover:text-primary">
+                                        <Icon name="chevron-left" />
+                                    </button>
+                                    <div className="flex items-center gap-2 bg-surface-variant border border-outline/30 px-4 py-2 rounded-sm text-on-surface-variant w-full max-w-xs">
+                                        <Icon name="search" size={16} />
+                                        <input type="text" placeholder="FILTER" className="bg-transparent border-none focus:ring-0 text-[10px] tracking-widest uppercase w-full" />
+                                    </div>
+                                </div>
+                                {inventory.length === 0 && !loading ? (
+                                    <div className="py-32 border border-dashed border-outline/30 rounded-lg flex justify-center"><Icon name="history" className="text-outline" size={48} strokeWidth={1} /></div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {inventory.map(item => (
+                                            <div key={item.id} className="bg-surface-variant border border-outline/50 p-6 rounded-lg flex flex-col gap-4 shadow-md group">
+                                                <div className="flex items-start justify-between">
+                                                    <div className="flex items-center gap-6">
+                                                        <div className="w-12 h-12 rounded-lg border border-white/5 flex items-center justify-center shrink-0" style={{backgroundColor: item.selectedColor}}>
+                                                            <Icon name="box" size={20} className="text-white/50" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-3"><h3 className="text-sm font-black uppercase tracking-wider">{item.name}</h3><span className="text-[8px] bg-primary/10 text-primary px-1 font-black rounded-sm">{item.material}</span></div>
+                                                            <div className="flex flex-wrap gap-4 text-[10px] text-on-surface-variant mt-1">
+                                                                <span className="flex items-center gap-1"><Icon name="user" size={12} /> {item.clientName}</span>
+                                                                <span className="flex items-center gap-1"><Icon name="scale" size={12} /> {item.filament}G</span>
+                                                                <span className="flex items-center gap-1 text-primary"><Icon name="indian-rupee" size={12} /> {item.cost}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <button onClick={() => deleteItem(item.id)} className="text-on-surface-variant hover:text-red-500 transition-colors p-2 shrink-0"><Icon name="trash-2" size={18} /></button>
+                                                </div>
+                                                {/* Comments Section */}
+                                                {item.comments && (
+                                                    <div className="pt-3 border-t border-outline/20">
+                                                        <p className="text-xs text-on-surface-variant/80 italic break-words flex gap-2">
+                                                            <Icon name="message-square" size={12} className="mt-0.5 shrink-0" />
+                                                            {item.comments}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {currentPage === 'add-product' && (
+                            <div className="animate-in slide-in-from-bottom-4 duration-300 pb-32">
+                                <button onClick={() => setCurrentPage('home')} className="mb-12 p-3 bg-surface-variant border border-outline rounded-full text-on-surface-variant hover:text-primary">
+                                    <Icon name="chevron-left" />
+                                </button>
+                                <form onSubmit={handleSubmit} className="space-y-6">
+                                    <div className="bg-surface-variant p-8 rounded-lg border border-outline/30 space-y-8 shadow-sm">
+                                        <div><Icon name="user" size={16} className="text-primary mb-2" />
+                                        <input name="clientName" value={formData.clientName} onChange={handleInputChange} className="w-full bg-outline/50 border-none focus:ring-0 p-4 text-sm focus:border-primary border-b-2 border-transparent transition-all rounded-sm" placeholder="CLIENT NAME" required /></div>
+                                        <div><Icon name="box" size={16} className="text-primary mb-2" />
+                                        <input name="name" value={formData.name} onChange={handleInputChange} className="w-full bg-outline/50 border-none focus:ring-0 p-4 text-sm focus:border-primary border-b-2 border-transparent transition-all rounded-sm" placeholder="PRODUCT" required /></div>
+                                        <div className="grid grid-cols-2 gap-8">
+                                            <div><Icon name="scale" size={16} className="text-primary mb-2" />
+                                            <div className="relative"><input name="filament" type="number" value={formData.filament} onChange={handleInputChange} className="w-full bg-outline/50 border-none focus:ring-0 p-4 text-sm rounded-sm" placeholder="GRAMS" required /><span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-on-surface-variant">GR</span></div></div>
+                                            <div className="pt-6"><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary text-sm">₹</span><input name="cost" type="number" value={formData.cost} onChange={handleInputChange} className="w-full bg-outline/50 border-none focus:ring-0 p-4 pl-10 text-sm rounded-sm" placeholder="COST" required /></div></div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-surface-variant p-8 rounded-lg border border-outline/30 flex flex-wrap gap-3 shadow-sm">
+                                        {materials.map(m => (
+                                            <button key={m} type="button" onClick={() => setFormData({...formData, material: m})} className={`px-6 py-3 text-[11px] font-black tracking-widest uppercase border rounded-sm transition-all ${formData.material === m ? 'bg-primary text-black border-primary shadow-lg shadow-primary/20' : 'border-outline text-on-surface-variant hover:border-primary/50'}`}>{m}</button>
+                                        ))}
+                                    </div>
+                                    <div className="bg-surface-variant p-8 rounded-lg border border-outline/30 grid grid-cols-6 sm:grid-cols-10 gap-3 shadow-sm">
+                                        {colors.map((c, i) => (
+                                            <button key={i} type="button" onClick={() => setFormData({...formData, selectedColor: c})} className={`w-8 h-8 rounded-full border-2 transition-transform active:scale-95 ${formData.selectedColor === c ? 'border-white scale-110 shadow-lg' : 'border-transparent'}`} style={{backgroundColor: c}}></button>
+                                        ))}
+                                    </div>
+                                    
+                                    <div className="bg-surface-variant p-8 rounded-lg border border-outline/30 shadow-sm">
+                                        <div className="flex items-center gap-2 mb-4">
+                                            <Icon name="message-square" size={16} className="text-primary" />
+                                            <span className="text-[10px] text-on-surface-variant uppercase tracking-widest font-black">ADDITIONAL NOTES</span>
+                                        </div>
+                                        <textarea 
+                                            name="comments"
+                                            value={formData.comments}
+                                            onChange={handleInputChange}
+                                            placeholder="Add comments, specifications, or details..."
+                                            className="w-full bg-outline/50 border-none focus:ring-0 p-4 text-sm focus:border-primary border-b-2 border-transparent transition-all rounded-sm min-h-[120px] resize-none"
+                                        />
+                                    </div>
+                                </form>
+                                <footer className="fixed bottom-0 left-0 w-full z-50 bg-surface/95 backdrop-blur-xl border-t border-outline/30 h-24 flex items-center justify-center gap-4">
+                                    <button onClick={() => setCurrentPage('home')} className="px-8 py-3 border border-outline text-on-surface-variant hover:text-red-500 hover:border-red-500/50 flex items-center gap-2 rounded-sm transition-all"><Icon name="x" size={16} />CANCEL</button>
+                                    <button onClick={handleSubmit} disabled={!isFormValid || isSubmitting} className={`px-12 py-3 border flex items-center gap-2 rounded-sm transition-all ${isFormValid ? 'bg-primary text-black border-primary shadow-lg shadow-primary/20' : 'opacity-50 grayscale cursor-not-allowed'}`}>
+                                        {isSubmitting ? <Icon name="zap" className="animate-pulse" size={16} /> : <Icon name="check" size={16} />}
+                                        <span className="font-black text-[11px] tracking-widest uppercase">{isSubmitting ? 'SAVING' : 'SAVE'}</span>
+                                    </button>
+                                </footer>
+                            </div>
+                        )}
+                    </main>
+
+                    {showNotification && (
+                        <div className="fixed top-20 right-6 z-[100] animate-in fade-in slide-in-from-right-10 bg-surface-variant border-l-4 border-green-500 p-4 shadow-2xl flex items-center gap-4 min-w-[280px]">
+                            <Icon name="check-circle-2" className="text-green-500" />
+                            <p className="text-[10px] font-black uppercase tracking-widest">Sheet Updated</p>
+                        </div>
+                    )}
+                    
+                    <div className="fixed inset-0 pointer-events-none opacity-[0.03] z-[100]" style={{backgroundImage: "url('https://grainy-gradients.vercel.app/noise.svg')"}}></div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
